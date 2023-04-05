@@ -1,7 +1,6 @@
-.PHONY: all clean check debug profile break valgrind design writeup testplan
+.PHONY: all clean check debug profile break valgrind design writeup testplan libraries
 # ----- Includes ----- #
-includes := $(shell find ./lib -type f -name "Makefile")
-$(info includes = $(includes))
+includes :=
 # ----- End Includes ----- #
 
 #-------- GCC Flags ---------#
@@ -10,6 +9,7 @@ CFLAGS += -Wall -Werror -Wextra -Wpedantic -Winline
 CFLAGS += -Wwrite-strings -Wvla -Wfloat-equal -Waggregate-return -Wunreachable-code
 CFLAGS += -D_DEFAULT_SOURCE
 # LIB_FLAGS := -D_MAIN_EXCLUDED
+TST_FLAGS :=
 #-------- End GCC Flags ---------#
 
 ############ Directories ############
@@ -24,34 +24,50 @@ COV_DIR := coverage
 LIB_DIR := lib
 LIB_OBJ_DIR := lib/obj
 ############ End Directories ############
-
 #----------- Sources and Objects -----------#
-STATIC_LIBS := $(shell find $(LIB_DIR) -type f -name "*.a")
-SHARED_LIBS += $(shell find $(LIB_DIR) -type f -name "*.so")
+ifeq ($(shell find ./ -type d -name "lib" > /dev/null), "lib")
+	includes := $(shell find ./lib -type f -name "Makefile")
+	STATIC_LIBS := $(shell find $(LIB_DIR) -type f -name "*.a")
+	SHARED_LIBS += $(shell find $(LIB_DIR) -type f -name "*.so")
+	$(info Primary: SHARED_LIBS is $(LIBS))
+	$(info $(basename $(notdir $(LIBS)).c))
+
+	$(info includes = $(includes))
+else
+	STATIC_LIBS :=
+	SHARED_LIBS :=
+
+endif
+
+ifeq ($(shell find ./ -type d -name "test"), "test")
+	TSTS := $(shell find $(TST_DIR) -type f -name "*.c")
+	TSTS_SRCS := $(notdir $(TSTS))
+	TST_OBJS := $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
+	TST_OBJS := $(filter-out $(OBJ_DIR)/$(EXE_NAME).o $(OBJ_DIR)/main.o, $(TST_OBJS))
+	TST_OBJS := $(patsubst $(TST_DIR)/%.c, $(OBJ_DIR)/%.o, $(TSTS))
+	TST_FLAGS := -lcheck -lm 
+	TST_FLAGS += -pthread -lrt -lsubunit -DTESTING
+	$(info TSTS is $(TSTS))
+	$(info TSTS_SRCS is $(TSTS_SRCS))
+	$(info TST_OBJS is $(TST_OBJS))
+else
+	TSTS :=
+	TSTS_SRCS :=
+	TST_OBJS :=
+endif
 
 SRCS := $(wildcard $(SRC_DIR)/**/*.c $(SRC_DIR)/*.c)
-SRCS += $(wildcard $(SRC_DIR)/%.c)
-OBJS := $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
-
-TSTS := $(shell find $(TST_DIR) -type f -name "*.c")
-TSTS_SRCS := $(notdir $(TSTS))
-TST_OBJS := $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
-TST_OBJS := $(filter-out $(OBJ_DIR)/$(EXE_NAME).o $(OBJ_DIR)/main.o, $(TST_OBJS))
-TST_OBJS := $(patsubst $(TST_DIR)/%.c, $(OBJ_DIR)/%.o, $(TSTS))
-
-$(info Primary: SHARED_LIBS is $(LIBS))
-$(info $(basename $(notdir $(LIBS)).c))
-
+SRCS += $(wildcard *.c)
+# MAIN_FILES := $(shell grep -Pzl 'int[[:space:]]main.*' $(SRCS))
+$(info Files with int main: $(MAIN_FILES))
+OBJS := $(patsubst %.c, $(OBJ_DIR)/%.o, $(SRCS))
 $(info SRCS is $(SRCS))
 $(info OBJS is $(OBJS))
-$(info TSTS is $(TSTS))
-$(info TSTS_SRCS is $(TSTS_SRCS))
-$(info TST_OBJS is $(TST_OBJS))
 #----------- End Sources and Objects -----------#
 
 
 ############ Executable ############
-EXE_NAME := minora
+EXE_NAME := mirror
 EXE := $(BIN_DIR)/$(EXE_NAME)
 EXE_ARGS :=
 DEBUG_EXE := $(BIN_DIR)/$(EXE_NAME)_debug
@@ -59,9 +75,6 @@ DEBUG_EXE := $(BIN_DIR)/$(EXE_NAME)_debug
 
 CHECK := $(BIN_DIR)/$(EXE_NAME)_check
 DRIVER := $(EXE_NAME)_driver
-
-TST_FLAGS := -lcheck -lm 
-TST_FLAGS += -pthread -lrt -lsubunit -DTESTING
 
 
 
@@ -152,39 +165,40 @@ $(TESTPLAN_DOC): $(DOC_DIR)
 	@make clean_doc > /dev/null
 ############# End Latex Target Configuration ############
 
-libraries:
+libraries: $(includes)
 	@for lib_makefile in $(includes); do \
 		echo "Building library: $$lib_makefile"; \
 		make -C $$(dirname $$lib_makefile); \
 	done
 
-$(OBJ_DIR) $(BIN_DIR) $(SRC_DIR) $(SRC_DIR)$(BUILTINS) $(TST_DIR) $(DOC_DIR) $(COV_DIR):
+$(OBJ_DIR) $(BIN_DIR) $(SRC_DIR) $(SRC_DIR)$(BUILTINS) $(TST_DIR) $(DOC_DIR) $(COV_DIR) $(LIB_DIR):
 	@mkdir -p $@
 
-$(OBJS) $(CHECK): | $(OBJ_DIR) $(SRC_DIR)$(BUILTINS)
+$(OBJS) $(CHECK): | $(OBJ_DIR) $(SRC_DIR)$(BUILTINS) $(SRC_DIR)
 
 
-$(OBJS): $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
+$(OBJS): $(OBJ_DIR)/%.o: %.c | $(OBJ_DIR) $(SRC_DIR)$(BUILTINS) $(SRC_DIR)
 	@mkdir -p $(dir $@)
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(TST_OBJS): $(OBJ_DIR)/%.o: $(TST_DIR)/%.c | $(OBJ_DIR)
+$(TST_OBJS): $(OBJ_DIR)/%.o: $(TST_DIR)/%.c | $(OBJ_DIR) $(SRC_DIR)$(BUILTINS) $(SRC_DIR)
 	@$(CC) $(CFLAGS) $(TST_FLAGS) -c $< -o $@
 
 
 
-$(EXE): $(SHARED_LIBS) | $(BIN_DIR)
+$(EXE): $(SHARED_LIBS) | $(OBJ_DIR) $(BIN_DIR) $(SRC_DIR)$(BUILTINS) $(SRC_DIR)
 	$(info made these objects: $(OBJS))
 	$(info making $(EXE) with these flags: $(CFLAGS))
-	$(CC) $(CFLAGS) $(OBJS) $(SHARED_LIBS) -o $@
+	$(CC) $(CFLAGS) $(OBJS) $(SHARED_LIBS) -o $@;
+
 
 $(DEBUG_EXE): $(OBJS) $(LIB_OBJS) | $(BIN_DIR)
 	$(info making $(DEBUG_EXE) with these flags: $(CFLAGS))
 	@$(CC) $(CFLAGS) $(OBJS) $(SHARED_LIBS) $^ -lm -o $@
 
-$(CHECK): $(TST_OBJS) libraries | $(BIN_DIR)
+$(CHECK): $(TST_OBJS) $(libraries) | $(BIN_DIR)
 	@$(info making $(CHECK) with these flags: $(CFLAGS) $(TST_FLAGS))
-	$(CC) $(CFLAGS) $< -o $@ $(TST_LIBS) $(SHARED_LIBS) $(TST_FLAGS)
+	$(CC) $(CFLAGS) $(OBJS) $< -o $@ $(TST_LIBS) $(SHARED_LIBS) $(TST_FLAGS)
 	@./$(CHECK)
 
 $(DRIVER): $(SRC_DIR)/$(DRIVER).c | $(BIN_DIR)
